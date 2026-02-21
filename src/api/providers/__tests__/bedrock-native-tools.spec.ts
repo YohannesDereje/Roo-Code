@@ -54,10 +54,16 @@ const testTools = [
 			parameters: {
 				type: "object",
 				properties: {
+					intent_id: { type: "string", description: "The active intent identifier" },
+					mutation_class: {
+						type: "string",
+						enum: ["AST_REFACTOR", "INTENT_EVOLUTION", "FIX"],
+						description: "Classification of the write operation",
+					},
 					path: { type: "string", description: "The path to the file" },
 					content: { type: "string", description: "The content to write" },
 				},
-				required: ["path", "content"],
+				required: ["intent_id", "mutation_class", "path", "content"],
 			},
 		},
 	},

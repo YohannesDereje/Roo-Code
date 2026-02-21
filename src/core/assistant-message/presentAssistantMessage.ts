@@ -1,3 +1,4 @@
+import * as vscode from "vscode"
 import { serializeError } from "serialize-error"
 import { Anthropic } from "@anthropic-ai/sdk"
 
@@ -705,6 +706,11 @@ export async function presentAssistantMessage(cline: Task) {
 			const preHookResult = await runPreToolUseHook(cline, block)
 			if (preHookResult.blocked) {
 				const errorMessage = `GOVERNANCE_ERROR: ${preHookResult.error}`
+				vscode.window.showErrorMessage(
+					preHookResult.error ?? "Governance error",
+					"Request Scope Expansion",
+					"Cancel",
+				)
 				cline.consecutiveMistakeCount++
 				try {
 					cline.recordToolError(block.name as ToolName, errorMessage)
@@ -718,7 +724,7 @@ export async function presentAssistantMessage(cline: Task) {
 					content: formatResponse.toolError(errorMessage),
 					is_error: true,
 				})
-				break
+				return
 			}
 
 			switch (block.name) {

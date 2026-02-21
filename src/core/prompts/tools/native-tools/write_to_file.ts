@@ -24,6 +24,15 @@ export default {
 		parameters: {
 			type: "object",
 			properties: {
+				intent_id: {
+					type: "string",
+					description: "The active intent identifier authorizing this write.",
+				},
+				mutation_class: {
+					type: "string",
+					enum: ["AST_REFACTOR", "INTENT_EVOLUTION", "FIX"],
+					description: "Classification of the write operation.",
+				},
 				path: {
 					type: "string",
 					description: PATH_PARAMETER_DESCRIPTION,
@@ -33,7 +42,7 @@ export default {
 					description: CONTENT_PARAMETER_DESCRIPTION,
 				},
 			},
-			required: ["path", "content"],
+			required: ["intent_id", "mutation_class", "path", "content"],
 			additionalProperties: false,
 		},
 	},

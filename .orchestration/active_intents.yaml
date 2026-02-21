@@ -27,6 +27,7 @@ intent_ledger:
         scope:
           files:
             - "src/hooks/types.ts"
+            - ".orchestration/**/*"
           forbidden:
             - "src/core/"
         constraints:
