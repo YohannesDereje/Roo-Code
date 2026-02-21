@@ -301,6 +301,9 @@ export function filterNativeToolsForMode(
 		}
 	}
 
+	// Ensure select_active_intent is always available, regardless of mode filtering.
+	allowedToolNames.add("select_active_intent")
+
 	// Conditionally exclude access_mcp_resource if MCP is not enabled or there are no resources
 	if (!mcpHub || !hasAnyMcpResources(mcpHub)) {
 		allowedToolNames.delete("access_mcp_resource")

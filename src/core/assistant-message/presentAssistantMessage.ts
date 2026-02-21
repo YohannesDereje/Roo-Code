@@ -1,6 +1,9 @@
 import { serializeError } from "serialize-error"
 import { Anthropic } from "@anthropic-ai/sdk"
 
+import { preToolUseHook } from "../../hooks/preToolUse"
+import { runPreToolUseHook } from "./preToolUseHookAdapter"
+
 import type { ToolName, ClineAsk, ToolProgressStatus } from "@roo-code/types"
 import { ConsecutiveMistakeError, TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -35,6 +38,7 @@ import { runSlashCommandTool } from "../tools/RunSlashCommandTool"
 import { skillTool } from "../tools/SkillTool"
 import { generateImageTool } from "../tools/GenerateImageTool"
 import { applyDiffTool as applyDiffToolClass } from "../tools/ApplyDiffTool"
+import { selectActiveIntentTool } from "../tools/SelectActiveIntentTool"
 import { isValidToolName, validateToolUse } from "../tools/validateToolUse"
 import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
 
@@ -225,10 +229,12 @@ export async function presentAssistantMessage(cline: Task) {
 				if (error instanceof AskIgnoredError) {
 					return
 				}
-				const errorString = `Error ${action}: ${JSON.stringify(serializeError(error))}`
+				const errorDetails = serializeError(error)
+				const errorStack = error.stack ? `\n${error.stack}` : ""
+				const errorString = `Error ${action}: ${JSON.stringify(errorDetails)}${errorStack}`
 				await cline.say(
 					"error",
-					`Error ${action}:\n${error.message ?? JSON.stringify(serializeError(error), null, 2)}`,
+					`Error ${action}:\n${error.message ?? JSON.stringify(errorDetails, null, 2)}${errorStack}`,
 				)
 				pushToolResult(formatResponse.toolError(errorString))
 			}
@@ -675,6 +681,46 @@ export async function presentAssistantMessage(cline: Task) {
 				}
 			}
 
+			const isHandshakeComplete = (cline as any).isHandshakeComplete === true
+			if (!isHandshakeComplete && block.name !== "select_active_intent") {
+				const errorMessage =
+					'GOVERNANCE_ERROR: Handshake not established. You must call select_active_intent("INT-001") before using any other tools.'
+				cline.consecutiveMistakeCount++
+				try {
+					cline.recordToolError(block.name as ToolName, errorMessage)
+				} catch {
+					// Best-effort only
+				}
+				await cline.say("error", errorMessage)
+				cline.pushToolResultToUserContent({
+					type: "tool_result",
+					tool_use_id: sanitizeToolUseId(toolCallId),
+					content: formatResponse.toolError(errorMessage),
+					is_error: true,
+				})
+				break
+			}
+
+			// Pre-tool use hook for governance and logging
+			const preHookResult = await runPreToolUseHook(cline, block)
+			if (preHookResult.blocked) {
+				const errorMessage = `GOVERNANCE_ERROR: ${preHookResult.error}`
+				cline.consecutiveMistakeCount++
+				try {
+					cline.recordToolError(block.name as ToolName, errorMessage)
+				} catch {
+					// Best-effort only
+				}
+				await cline.say("error", errorMessage)
+				cline.pushToolResultToUserContent({
+					type: "tool_result",
+					tool_use_id: sanitizeToolUseId(toolCallId),
+					content: formatResponse.toolError(errorMessage),
+					is_error: true,
+				})
+				break
+			}
+
 			switch (block.name) {
 				case "write_to_file":
 					await checkpointSaveAndMark(cline)
@@ -798,6 +844,13 @@ export async function presentAssistantMessage(cline: Task) {
 					break
 				case "switch_mode":
 					await switchModeTool.handle(cline, block as ToolUse<"switch_mode">, {
+						askApproval,
+						handleError,
+						pushToolResult,
+					})
+					break
+				case "select_active_intent":
+					await selectActiveIntentTool.handle(cline, block as ToolUse<"select_active_intent">, {
 						askApproval,
 						handleError,
 						pushToolResult,

@@ -1,6 +1,8 @@
 import path from "path"
 import delay from "delay"
 import fs from "fs/promises"
+import * as vscode from "vscode"
+import * as yaml from "yaml"
 
 import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 
@@ -15,12 +17,63 @@ import { unescapeHtmlEntities } from "../../utils/text-normalization"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { convertNewFileToUnifiedDiff, computeDiffStats, sanitizeUnifiedDiff } from "../diff/stats"
 import type { ToolUse } from "../../shared/tools"
+import { sha256 } from "../../utils/hashing"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 
 interface WriteToFileParams {
 	path: string
 	content: string
+}
+
+const TRACE_FILENAME = "agent_trace.jsonl"
+
+async function appendIntentTrace(task: Task, relPath: string, absolutePath: string): Promise<void> {
+	const activeIntentId = task.activeIntentId
+	if (!activeIntentId) {
+		return
+	}
+
+	const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+	if (!workspaceRoot) {
+		return
+	}
+
+	try {
+		const ledgerPath = path.join(workspaceRoot, ".orchestration", "active_intents.yaml")
+		const ledgerRaw = await fs.readFile(ledgerPath, "utf-8")
+		const ledger = yaml.parse(ledgerRaw) as Record<string, any> | undefined
+		const intentLedger = ledger?.intent_ledger ?? ledger
+		const intents = intentLedger?.intents
+
+		let classification = "unknown"
+		if (Array.isArray(intents)) {
+			const matched = intents.find((entry) => entry && entry.id === activeIntentId)
+			if (matched?.classification) {
+				classification = String(matched.classification)
+			}
+		} else if (intents && typeof intents === "object") {
+			const matched = intents[activeIntentId]
+			if (matched?.classification) {
+				classification = String(matched.classification)
+			}
+		}
+
+		const fileContent = await fs.readFile(absolutePath, "utf-8")
+		const hash = sha256(fileContent)
+		const traceEntry = {
+			timestamp: new Date().toISOString(),
+			intentId: activeIntentId,
+			filePath: path.relative(workspaceRoot, absolutePath) || relPath,
+			hash,
+			classification,
+		}
+
+		const tracePath = path.join(workspaceRoot, ".orchestration", TRACE_FILENAME)
+		await fs.appendFile(tracePath, `${JSON.stringify(traceEntry)}\n`, "utf-8")
+	} catch (error) {
+		console.warn("Failed to append intent trace:", error)
+	}
 }
 
 export class WriteToFileTool extends BaseTool<"write_to_file"> {
@@ -170,6 +223,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			}
 
 			if (relPath) {
+				await appendIntentTrace(task, relPath, absolutePath)
 				await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
 			}
 
